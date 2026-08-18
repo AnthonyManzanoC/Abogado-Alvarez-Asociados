@@ -1,0 +1,2 @@
+import Link from "next/link";
+export default function NotFound(){return <main className="auth-page" style={{gridTemplateColumns:'1fr'}}><div className="auth-brand" style={{minHeight:'100svh',alignItems:'center',justifyContent:'center',textAlign:'center'}}><span className="eyebrow" style={{color:'var(--gold)'}}>Error 404</span><h1 className="auth-quote">Esta página no forma parte del <em>expediente.</em></h1><Link href="/" className="button-primary" style={{marginTop:35}}>Volver al inicio</Link></div></main>}

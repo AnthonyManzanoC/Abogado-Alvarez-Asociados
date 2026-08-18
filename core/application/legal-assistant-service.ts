@@ -1,0 +1,39 @@
+import type { Article, Lawyer, PracticeArea, SiteSettings } from "@/core/domain/entities";
+
+export type AssistantKnowledge = { settings: SiteSettings; practices: PracticeArea[]; lawyers: Lawyer[]; articles: Article[] };
+export type AssistantAnswer = { reply: string; intent: string; suggestions: string[]; link?: { href: string; label: string } };
+
+const stopWords = new Set(["para", "como", "donde", "cuando", "quiero", "tengo", "necesito", "sobre", "puede", "pueden", "este", "esta", "esto", "hola", "buenas", "favor", "ayuda", "asesoria", "abogado", "abogados"]);
+const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9ñ\s]/g, " ");
+const tokens = (value: string) => normalize(value).split(/\s+/).filter((word) => word.length > 2 && !stopWords.has(word));
+const includesAny = (text: string, words: string[]) => words.some((word) => text.includes(word));
+const score = (query: string[], value: string) => { const target = new Set(tokens(value)); return query.reduce((total, word) => total + (target.has(word) ? 3 : [...target].some((item) => item.includes(word) || word.includes(item)) ? 1 : 0), 0); };
+
+export function answerLegalAssistant(message: string, knowledge: AssistantKnowledge): AssistantAnswer {
+  const text = normalize(message);
+  const query = tokens(message);
+  const { settings, practices, lawyers, articles } = knowledge;
+  const defaults = ["¿Qué servicios ofrecen?", "Quiero agendar una consulta", "¿Dónde están ubicados?"];
+  const matchedPractice = practices.map((practice) => ({ practice, score: score(query, `${practice.title} ${practice.description}`) })).sort((a, b) => b.score - a.score)[0];
+
+  if (includesAny(text, ["hola", "buenos dias", "buenas tardes", "buenas noches", "hey", "saludos"])) return { intent: "greeting", reply: `Hola. Soy el asistente virtual de ${settings.short_name}. Puedo orientarle sobre nuestros servicios, profesionales, publicaciones, ubicación y cómo solicitar una consulta.`, suggestions: defaults };
+  if (includesAny(text, ["que servicios", "cuales servicios", "servicios ofrecen", "areas de practica"])) return { intent: "services", reply: `Las áreas publicadas actualmente son: ${practices.map((practice) => practice.title).join(", ")}. Puedo explicarle una de ellas si escribe su nombre.`, suggestions: practices.slice(0, 3).map((practice) => practice.title), link: { href: "/servicios", label: "Ver servicios" } };
+  if (includesAny(text, ["precio", "costo", "cuanto cuesta", "honorario", "tarifa"])) return { intent: "fees", reply: "Los honorarios dependen de la naturaleza, urgencia y alcance del asunto. Para ofrecer una respuesta responsable, el estudio primero debe conocer la información inicial del caso. Puede solicitar una evaluación confidencial desde el formulario de contacto.", suggestions: ["Quiero solicitar una consulta", "¿Qué información debo enviar?"], link: { href: "/contacto", label: "Solicitar evaluación" } };
+  if (matchedPractice?.score >= 3 && !includesAny(text, ["agendar", "cita", "reunion"])) return { intent: "practice", reply: `El estudio trabaja en ${matchedPractice.practice.title}. ${matchedPractice.practice.description} Para determinar si esta área corresponde exactamente a su situación, conviene solicitar una evaluación confidencial.`, suggestions: ["Quiero agendar una consulta", "Ver todos los servicios"], link: { href: "/servicios", label: "Conocer servicios" } };
+  if (includesAny(text, ["cita", "agendar", "consulta", "contactar", "hablar", "reunion", "evaluacion"])) return { intent: "consultation", reply: `Puede enviar una solicitud confidencial desde Contacto. El estudio la revisará y responderá por correo. También puede comunicarse al ${settings.phone} o escribir a ${settings.email}.`, suggestions: ["¿Qué información debo enviar?", "Ver ubicación"], link: { href: "/contacto", label: "Ir a contacto" } };
+  if (includesAny(text, ["ubicacion", "direccion", "mapa", "llegar", "oficina", "donde estan", "donde esta"])) return { intent: "location", reply: `${settings.map_title}: ${settings.address}. En la página de contacto encontrará el mapa interactivo actualizado por el estudio.`, suggestions: ["Quiero agendar una consulta", "Ver servicios"], link: { href: "/contacto", label: "Ver mapa y contacto" } };
+  if (includesAny(text, ["telefono", "correo", "email", "whatsapp"])) return { intent: "contact", reply: `Puede contactar al estudio por teléfono al ${settings.phone}, por correo a ${settings.email}${settings.whatsapp ? ` o mediante WhatsApp al ${settings.whatsapp}` : ""}.`, suggestions: ["Quiero agendar una consulta", "¿Dónde están ubicados?"], link: { href: "/contacto", label: "Datos de contacto" } };
+  if (includesAny(text, ["quienes son", "historia", "filosofia", "firma", "sobre ustedes"])) return { intent: "about", reply: `${settings.about_title} ${settings.about_text}`, suggestions: ["Conocer al equipo", "Ver servicios"], link: { href: "/nosotros", label: "Conocer el estudio" } };
+  if (includesAny(text, ["equipo", "profesional", "perfil", "biografia"])) { const names = lawyers.slice(0, 4).map((lawyer) => `${lawyer.full_name}, ${lawyer.title}`).join("; "); return { intent: "team", reply: names ? `El directorio profesional está integrado por ${names}. Puede abrir cada perfil para consultar su biografía, especialidades y trayectoria.` : "El directorio profesional se está actualizando. Puede contactar directamente al estudio para conocer quién atenderá su asunto.", suggestions: lawyers.slice(0, 3).map((lawyer) => `Perfil de ${lawyer.full_name}`), link: { href: "/equipo", label: "Ver directorio" } }; }
+  if (includesAny(text, ["articulo", "editorial", "noticia", "publicacion", "leer"])) { const latest = articles[0]; return { intent: "editorial", reply: latest ? `La editorial reúne análisis y guías legales. La publicación más reciente es “${latest.title}”: ${latest.excerpt}` : "La editorial jurídica se encuentra en actualización.", suggestions: ["Ver todos los artículos", "¿Qué servicios ofrecen?"], link: { href: "/editorial", label: "Abrir editorial" } }; }
+
+  if (matchedPractice?.score > 0 || includesAny(text, ["servicio", "especialidad", "area", "caso", "problema legal"])) {
+    if (matchedPractice?.score > 0) return { intent: "practice", reply: `El estudio trabaja en ${matchedPractice.practice.title}. ${matchedPractice.practice.description} Para determinar si esta área corresponde exactamente a su situación, conviene solicitar una evaluación confidencial.`, suggestions: ["Quiero agendar una consulta", "Ver todos los servicios"], link: { href: "/servicios", label: "Conocer servicios" } };
+    return { intent: "services", reply: `Las áreas publicadas actualmente son: ${practices.map((practice) => practice.title).join(", ")}. Puedo explicarle una de ellas si escribe su nombre.`, suggestions: practices.slice(0, 3).map((practice) => practice.title), link: { href: "/servicios", label: "Ver servicios" } };
+  }
+
+  const matchedLawyer = lawyers.map((lawyer) => ({ lawyer, score: score(query, `${lawyer.full_name} ${lawyer.title} ${lawyer.specialties.join(" ")}`) })).sort((a, b) => b.score - a.score)[0];
+  if (matchedLawyer?.score >= 3) return { intent: "lawyer", reply: `${matchedLawyer.lawyer.full_name} es ${matchedLawyer.lawyer.title}. ${matchedLawyer.lawyer.summary} Sus áreas publicadas incluyen ${matchedLawyer.lawyer.specialties.join(", ")}.`, suggestions: ["Ver su perfil", "Quiero una consulta"], link: { href: `/equipo/${matchedLawyer.lawyer.slug}`, label: "Abrir perfil" } };
+
+  return { intent: "fallback", reply: "Puedo ayudarle con información publicada sobre servicios, abogados, editorial, ubicación y solicitudes de consulta. No emito diagnósticos ni asesoría legal automática; si su asunto tiene un plazo urgente, contacte al estudio directamente.", suggestions: defaults, link: { href: "/contacto", label: "Contactar al estudio" } };
+}
